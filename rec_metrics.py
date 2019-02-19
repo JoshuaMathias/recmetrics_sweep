@@ -1,3 +1,5 @@
+import functional
+
 # Class for conveniently executing, storing, and loading evaluation of recommendations.
 # Can be done in batches.
 class RecMetrics:
