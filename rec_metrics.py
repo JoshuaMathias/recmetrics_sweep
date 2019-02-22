@@ -1,5 +1,3 @@
-import functional
-
 # Class for conveniently executing, storing, and loading evaluation of recommendations.
 # Can be done in batches.
 class RecMetrics:
@@ -27,11 +25,13 @@ class RecMetrics:
         elif metric.startswith('#'):
           k_scores.append(0)
         elif 'Coverage' in metric:
-          k_scores.append(set())
+          if metric.startswith('P'):
+            k_scores.append(set())
+          else:
+            k_scores.append(set())
         else:
           k_scores.append([])
       self.scores.append(k_scores)
-    vprint(self.scores, 'scores')
     self.norms = []
     self.num_samples = 0
     self.num_items = 0
@@ -68,7 +68,9 @@ class RecMetrics:
         if 'k' == metric:
           continue
         elif metric.startswith('#'): # Number of items (e.g. for #Coverage)
-          self.scores[k_i][metric_i] = max(self.scores[k_i][metric_i], metric_scores)
+          # This depends on the respective coverage being updated first
+          num_covered = vlen(self.scores[k_i][self.metrics_indices[metric.replace('#', '')]])
+          self.scores[k_i][metric_i] = num_covered
           vprint(self.scores[k_i][metric_i], metric)
         elif 'Coverage' not in metric:
           self.scores[k_i][metric_i].extend(metric_scores)
@@ -149,5 +151,16 @@ class RecMetrics:
     return self.norms
   
   def __str__(self):
-    return str(self.metrics)+"\n\t"+str(self.k_vals)+"\n\t"+str(self.norms)+"\n\tSamples: "+str(self.num_samples)
+    return "\n"+tabulate(self.norms, headers=self.metrics)+"\nSamples: "+str(self.num_samples)
+#     return str(self.metrics)+"\n\tk:"+str(self.k_vals)+"\n\tnormalized scores:"+str(self.norms)+"\n\tSamples: "+str(self.num_samples)
+  
+  def copy(self):
+    return self.__copy__()
+  
+  def __copy__(self):
+    obj = type(self).__new__(self.__class__)
+    obj.__dict__.update(self.__dict__)
+    return obj
+  
+  
     
