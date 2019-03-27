@@ -2,7 +2,6 @@
 import sys
 import pickle
 import csv
-vprint(sys.version)
 import numpy as np
 from tabulate import tabulate
 import matplotlib.pyplot as plt
