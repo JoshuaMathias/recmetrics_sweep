@@ -1,8 +1,11 @@
+from functional import *
+from tabulate import tabulate
+
 # Class for conveniently executing, storing, and loading evaluation of recommendations.
 # Can be done in batches.
 class RecMetrics:
   # Metrics are case sensitive. Note that specifying k overrides k_vals.
-  def __init__(self, metrics=['k', 'NDCG', 'Precision', 'Recall', 'F', 'MRR', 'Coverage', '#Coverage', 'PCoverage', '#PCoverage'],
+  def __init__(self, metrics=['k', 'MRR', 'NDCG', 'Precision', 'Recall', 'F', 'Coverage', '#Coverage', 'PCoverage', '#PCoverage'],
           k_vals=[5], k=None, verbose=False):
     self.metrics = metrics
     self.metrics_indices = {}
@@ -64,14 +67,16 @@ class RecMetrics:
         metric_scores = calced_scores[k_i][metric_i]
         metric = self.metrics[metric_i]
         if self.verbose:
-          vprint(metric_scores, metric)
+          if metric == 'Coverage':
+            lprint(metric_scores, metric)
+          else:
+            aprint(metric_scores, metric)
         if 'k' == metric:
           continue
         elif metric.startswith('#'): # Number of items (e.g. for #Coverage)
           # This depends on the respective coverage being updated first
           num_covered = vlen(self.scores[k_i][self.metrics_indices[metric.replace('#', '')]])
           self.scores[k_i][metric_i] = num_covered
-          vprint(self.scores[k_i][metric_i], metric)
         elif 'Coverage' not in metric:
           self.scores[k_i][metric_i].extend(metric_scores)
         else:
@@ -128,6 +133,8 @@ class RecMetrics:
       norms_writer = csv.writer(file, delimiter=delim, quotechar="'")
       norms_writer.writerow(self.metrics)
       norms_writer.writerows(self.norms)
+      if self.verbose:
+        vprint(filename, 'Saved normalized scores as csv')
   
   def load_norms(self, filename, delim=','):
     self.norms = []
@@ -137,7 +144,7 @@ class RecMetrics:
       for row in norms_reader:
         self.norms.append(row)
     return self.norms
-  
+
   def call(self, *argv, print_metrics=True, plot_k=False, **kwargs):
     return self.__call__(*argv, print_metrics=True, plot_k=False, **kwargs)
   
