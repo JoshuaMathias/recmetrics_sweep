@@ -2,10 +2,37 @@
 import sys
 import pickle
 import csv
-vprint(sys.version)
 import numpy as np
 from tabulate import tabulate
 import matplotlib.pyplot as plt
+from math import log10, floor
+
+
+# Round value to sig_digits significant digits.
+def round_sig(x, sig=3):
+  if x == 0:
+    return 0
+  return round(x, sig-int(floor(log10(abs(x))))-1)
+
+# Normalize the formatting of scores.
+def format_score(score, sig_digits=3, use_scientific=False):
+  score = to_num(score)
+  if score == False:
+    try:
+      score = float(score)
+    except ValueError:
+      pass
+  if score == 0:
+    return "0"
+  if sig_digits is not None:
+    score = round_sig(score, sig=sig_digits)
+  if score < 1:
+    if use_scientific:
+      score = '{:.{}E}'.format(float(score),sig_digits-1)
+#     else:
+#       if not isinstance(score, int):
+#         score = '%f' % score
+  return score
 
 # Pad matrix with following zeros.
 def lists_to_matrix(lists, dtype=float):
@@ -59,7 +86,7 @@ def indices_values_matrices(indices_lists, weights_lists, lens=None):
   
   return indices_matrix, weights_matrix
 
-# DCG = sum of (2^relevance score - 1 / log2(rank + 1)) for rank=(1 to k)
+# DCG = sum of ((2^relevance score - 1) / log2(rank + 1)) for rank=(1 to k)
 def dcg(pred_scores, k=5):
   discounts = np.log2(np.arange(0, k) + 2) # 2, 3, ... k+1
   if k > len(pred_scores[0]):
@@ -92,14 +119,23 @@ def find_num_corrects(predicted, row_i=-1, relevances=[]):
   return np.where(relevances[row_i][predicted] > 0)
 
 
-# Calculate and return NDCG@k, Precision@k, Recall@k, Coverage@k, Correct Coverage@k, MRR
+# Calculate and return MRR, NDCG@k, Precision@k, Recall@k, Coverage@k, Correct Coverage@k
 # Scores are returned by row except for the two coverages, which are returned as sets of indices
   # (in case further analysis is desired).
 def score_rec_metrics(true_indices, true_weights, pred_relevances, 
-                      metrics=['k', 'NDCG', 'Precision', 'Recall', 
-                               'F', 'MRR', 'Coverage', '#Coverage', 
+                      metrics=['k', 'MRR', 'NDCG', 'Precision', 'Recall', 
+                               'F', 'Coverage', '#Coverage', 
                                'PCoverage', '#PCoverage'],
                      metrics_indices=None, k_vals=[5], k=None, verbose=False):
+  if hasattr(pred_relevances, 'toarray'):
+    pred_relevances = pred_relevances.toarray()
+  if vlen(true_indices) != vlen(true_weights) or vlen(true_indices) != vlen(pred_relevances):
+    eprint('true_indices, true_weights, and pred_relevances must have the same first dimension (samples)')
+    lprint(true_indices)
+    lprint(true_weights)
+    lprint(pred_relevances)
+    return
+
   start()
   if k:
     k_vals = k
@@ -119,10 +155,12 @@ def score_rec_metrics(true_indices, true_weights, pred_relevances,
     for metric in metrics:
       metrics_indices[metric] = metric_i
       metric_i += 1
-  end("Setup")
+  if verbose:
+    end("Setup")
   
   # Negate relevances to sort and distinguish from positive true_weights
   pred_relevances = pred_relevances * -1 
+  # vprint(pred_relevances, 'negated pred relevances')
   # Sort indices corresponding to items
   max_k = max(k_vals)
   if 'MRR' in metrics_indices:
@@ -136,13 +174,20 @@ def score_rec_metrics(true_indices, true_weights, pred_relevances,
   
   # Insert true weights to relevances matrix to score ordered indices
   np.put_along_axis(pred_relevances, true_indices, true_weights, axis=1)
-#   vprint(pred_relevances, 'relevances with true weights')
-  # Reward top indices that had a positive true weight inserted
-  top_scores = np.take_along_axis(pred_relevances, pred_ordered, axis=1)
+  # vprint(pred_relevances, 'relevances with true weights')
+  try:
+    # Reward top indices that had a positive true weight inserted
+    top_scores = np.take_along_axis(pred_relevances, pred_ordered, axis=1)
+  except ValueError as e:
+    eprint(e)
+    aprint(pred_relevances)
+    aprint(pred_ordered)
+    
   if verbose:
     end("Score predictions")
   
   if 'MRR' in metrics_indices:
+    # MRR = 1 / rank of first correct recommendation
     first_corrects = find_first_corrects(top_scores)
     mrr_scores = np.reciprocal(first_corrects.astype(float))
     mrr_i = metrics_indices['MRR']
@@ -157,8 +202,9 @@ def score_rec_metrics(true_indices, true_weights, pred_relevances,
     if 'k' in metrics_indices:
       scores[k_i][metrics_indices['k']] = k
     # Don't let k be greater than the number of possible items to recommend.
-    vprint(k)
-    vprint(num_items)
+    if verbose:
+      vprint(k)
+      vprint(num_items)
     if k > num_items:
       if verbose:
         print("k="+str(k)+" set to "+str(num_items)+" to match number of items")
@@ -173,7 +219,7 @@ def score_rec_metrics(true_indices, true_weights, pred_relevances,
       # Get number of correct indices recommended
       num_corrects = np.count_nonzero(top_k_scores, axis=1)
       if 'Precision' in metrics_indices or 'F' in metrics_indices:
-        # precision@k = number correct / k
+        # precision@k = number correct@k / k
         precision_k_scores = num_corrects * 1/k
         scores[k_i][metrics_indices['Precision']] = precision_k_scores
         if verbose:
@@ -184,7 +230,7 @@ def score_rec_metrics(true_indices, true_weights, pred_relevances,
         # How many true/correct recommendations are there in total?
         if true_lens is None:
           true_lens = np.count_nonzero(pred_relevances, axis=1)
-        # recall@k = number correct / total possible correct
+        # recall@k = number correct@k / total possible correct
         # nan to num just in case someone wants to allow samples where there are no true recommendations (divide by 0)
         recall_k_scores = np.nan_to_num(np.divide(num_corrects, true_lens))
         scores[k_i][metrics_indices['Recall']] = recall_k_scores
@@ -193,6 +239,7 @@ def score_rec_metrics(true_indices, true_weights, pred_relevances,
 
     
       if 'F' in metrics_indices:
+        # F@k = precision * recall / (precision + recall)
         precision_recall = np.nan_to_num(np.divide(precision_k_scores * recall_k_scores, precision_k_scores + recall_k_scores), copy=False)
         f_k_scores = 2 * precision_recall
         scores[k_i][metrics_indices['F']] = f_k_scores
@@ -200,7 +247,7 @@ def score_rec_metrics(true_indices, true_weights, pred_relevances,
           end("F Score")
 
     if 'NDCG' in metrics_indices:
-      # DCG = sum of (2^relevance score - 1 / log2(rank + 1)) for rank=(1 to k)
+      # DCG = sum of ((2^relevance score - 1) / log2(rank + 1)) for rank=(1 to k)
       pred_dcg = dcg(top_k_scores, k)
       ideal_dcg = dcg(true_weights, k)
       # NDCG = predicted DCG / ideal DCG
@@ -297,3 +344,8 @@ def plot_rec_metrics(norms, metrics):
   plt.title('Recommender System Metrics by k')
   plt.grid(True)
   plt.show()
+
+# Methods is a list of RecMetrics objects
+# def compare_methods(methods):
+  
+  
